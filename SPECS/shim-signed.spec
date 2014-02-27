@@ -1,15 +1,16 @@
 Name:           shim-signed
 Version:        0.7
-Release:        5%{?dist}
+Release:        5.2%{?dist}
 Summary:        First-stage UEFI bootloader
 Provides:	shim = %{version}-%{release}
-%define unsigned_release 4%{?dist}
+%define unsigned_release 5%{?dist}
 
 License:        BSD
 URL:            http://www.codon.org.uk/~mjg59/shim/
+Source0:	shim.efi
 Source1:	BOOT.CSV
-Source2:	redhatsecureboot003.cer
-Source3:	redhatsecurebootca2.cer
+Source2:	secureboot.cer
+Source3:	securebootca.cer
 
 BuildRequires: shim-unsigned = %{version}-%{unsigned_release}
 BuildRequires: pesign >= 0.106-5%{dist}
@@ -62,20 +63,27 @@ mkdir shim-signed-%{version}
 %define vendor_cert_str %{expand:%%{!?vendor_cert_nickname:-c "Red Hat Test Certificate"}%%{?vendor_cert_nickname:-c "%%{vendor_cert_nickname}"}}
 
 cd shim-signed-%{version}
-pesign -i %{_datadir}/shim/shim.efi -h -P > shim.hash
+pesign -i %{SOURCE0} -h -P > shim.hash
 if ! cmp shim.hash %{_datadir}/shim/shim.hash ; then
 	echo Invalid signature\! > /dev/stderr
 	exit 1
 fi
-%pesign -s -i %{_datadir}/shim/shim.efi -o shim.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot003
-%pesign -s -i %{_datadir}/shim/MokManager.efi -o MokManager.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot003
-%pesign -s -i %{_datadir}/shim/fallback.efi -o fallback.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot003
+pesign -i %{SOURCE0} -o clean.efi -r -u 0
+%pesign -s -i clean.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301 -o tmp.efi
+pesign -i tmp.efi -e shim-redhat.sig
+rm tmp.efi
+pesign -i %{SOURCE0} -o shim.efi -m shim-redhat.sig -u 1
+pesign -i %{SOURCE0} -o tmp.efi -r -u 0
+pesign -i tmp.efi -o shim-redhat.efi -m shim-redhat.sig
+%pesign -s -i %{_datadir}/shim/MokManager.efi -o MokManager.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301
+%pesign -s -i %{_datadir}/shim/fallback.efi -o fallback.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301
 
 %install
 rm -rf $RPM_BUILD_ROOT
 cd shim-signed-%{version}
 install -D -d -m 0755 $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/
 install -m 0644 shim.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim.efi
+install -m 0644 shim-redhat.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim-redhat.efi
 install -m 0644 MokManager.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/MokManager.efi
 install -m 0644 %{SOURCE1} $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/BOOT.CSV
 
@@ -85,12 +93,21 @@ install -m 0644 fallback.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/fallback.efi
 
 %files -n shim
 /boot/efi/EFI/%{efidir}/shim.efi
+/boot/efi/EFI/%{efidir}/shim-redhat.efi
 /boot/efi/EFI/%{efidir}/MokManager.efi
 /boot/efi/EFI/%{efidir}/BOOT.CSV
 /boot/efi/EFI/BOOT/BOOTX64.EFI
 /boot/efi/EFI/BOOT/fallback.efi
 
 %changelog
+* Thu Feb 27 2014 Peter Jones <pjones@redhat.com> - 0.7-5.2
+- Get the right signatures on shim-redhat.efi
+  Related: rhbz#1064449
+
+* Thu Feb 27 2014 Peter Jones <pjones@redhat.com> - 0.7-5.1
+- Update for signed shim for RHEL 7
+  Resolves: rhbz#1064449
+
 * Thu Nov 21 2013 Peter Jones <pjones@redhat.com> - 0.7-5
 - Fix shim-unsigned deps.
   Related: rhbz#1032583
