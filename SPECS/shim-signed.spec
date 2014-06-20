@@ -9,8 +9,7 @@ License:        BSD
 URL:            http://www.codon.org.uk/~mjg59/shim/
 Source0:	shim.efi
 Source1:	BOOT.CSV
-Source2:	secureboot.cer
-Source3:	securebootca.cer
+Source2:	centos.cer
 
 BuildRequires: shim-unsigned = %{version}-%{unsigned_release}
 BuildRequires: pesign >= 0.106-5%{dist}
@@ -69,14 +68,14 @@ if ! cmp shim.hash %{_datadir}/shim/shim.hash ; then
 	exit 1
 fi
 pesign -i %{SOURCE0} -o clean.efi -r -u 0
-%pesign -s -i clean.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301 -o tmp.efi
+%pesign -s -i clean.efi -a %{SOURCE2} -c %{SOURCE2} -n redhatsecureboot301 -o tmp.efi
 pesign -i tmp.efi -e shim-redhat.sig
 rm tmp.efi
 pesign -i %{SOURCE0} -o shim.efi -m shim-redhat.sig -u 1
 pesign -i %{SOURCE0} -o tmp.efi -r -u 0
 pesign -i tmp.efi -o shim-redhat.efi -m shim-redhat.sig
-%pesign -s -i %{_datadir}/shim/MokManager.efi -o MokManager.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301
-%pesign -s -i %{_datadir}/shim/fallback.efi -o fallback.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301
+%pesign -s -i %{_datadir}/shim/MokManager.efi -o MokManager.efi -a %{SOURCE2} -c %{SOURCE2} -n redhatsecureboot301
+%pesign -s -i %{_datadir}/shim/fallback.efi -o fallback.efi -a %{SOURCE2} -c %{SOURCE2} -n redhatsecureboot301
 
 %install
 rm -rf $RPM_BUILD_ROOT
@@ -100,6 +99,9 @@ install -m 0644 fallback.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/fallback.efi
 /boot/efi/EFI/BOOT/fallback.efi
 
 %changelog
+* Fri Jun 20 2014 Karanbir Singh <kbsingh@centos.org> - 0.7-5.2.el7.centos
+- Roll in CentOS SB certs
+
 * Thu Feb 27 2014 Peter Jones <pjones@redhat.com> - 0.7-5.2
 - Get the right signatures on shim-redhat.efi
   Related: rhbz#1064449
