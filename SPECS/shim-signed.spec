@@ -1,15 +1,16 @@
 Name:           shim-signed
 Version:        0.7
-Release:        5.2%{?dist}
+Release:        8%{?dist}
 Summary:        First-stage UEFI bootloader
 Provides:	shim = %{version}-%{release}
-%define unsigned_release 5%{?dist}
+%define unsigned_release 8%{?dist}
 
 License:        BSD
 URL:            http://www.codon.org.uk/~mjg59/shim/
 Source0:	shim.efi
 Source1:	BOOT.CSV
-Source2:	centos.cer
+Source2:	secureboot.cer
+Source3:	securebootca.cer
 
 BuildRequires: shim-unsigned = %{version}-%{unsigned_release}
 BuildRequires: pesign >= 0.106-5%{dist}
@@ -18,12 +19,12 @@ BuildRequires: pesign >= 0.106-5%{dist}
 # compatible with SysV (there's no red zone under UEFI) and there isn't a
 # POSIX-style C library.
 # BuildRequires: OpenSSL
-Provides: bundled(openssl) = 0.9.8w
+Provides: bundled(openssl) = 0.9.8zb
 
 # Shim is only required on platforms implementing the UEFI secure boot
 # protocol. The only one of those we currently wish to support is 64-bit x86.
 # Adding further platforms will require adding appropriate relocation code.
-ExclusiveArch: x86_64
+ExclusiveArch: x86_64 aarch64
 
 %global debug_package %{nil}
 
@@ -34,6 +35,9 @@ ExclusiveArch: x86_64
 %if 0%{?fedora}
 %global efidir fedora
 %endif
+
+%define ca_signed_arches x86_64
+%define rh_signed_arches x86_64 aarch64
 
 %description
 Initial UEFI bootloader that handles chaining to a trusted full bootloader
@@ -62,27 +66,32 @@ mkdir shim-signed-%{version}
 %define vendor_cert_str %{expand:%%{!?vendor_cert_nickname:-c "Red Hat Test Certificate"}%%{?vendor_cert_nickname:-c "%%{vendor_cert_nickname}"}}
 
 cd shim-signed-%{version}
+%ifarch %{ca_signed_arches}
 pesign -i %{SOURCE0} -h -P > shim.hash
 if ! cmp shim.hash %{_datadir}/shim/shim.hash ; then
 	echo Invalid signature\! > /dev/stderr
 	exit 1
 fi
-pesign -i %{SOURCE0} -o clean.efi -r -u 0
-%pesign -s -i clean.efi -a %{SOURCE2} -c %{SOURCE2} -n redhatsecureboot301 -o tmp.efi
-pesign -i tmp.efi -e shim-redhat.sig
-rm tmp.efi
-pesign -i %{SOURCE0} -o shim.efi -m shim-redhat.sig -u 1
-pesign -i %{SOURCE0} -o tmp.efi -r -u 0
-pesign -i tmp.efi -o shim-redhat.efi -m shim-redhat.sig
-%pesign -s -i %{_datadir}/shim/MokManager.efi -o MokManager.efi -a %{SOURCE2} -c %{SOURCE2} -n redhatsecureboot301
-%pesign -s -i %{_datadir}/shim/fallback.efi -o fallback.efi -a %{SOURCE2} -c %{SOURCE2} -n redhatsecureboot301
+cp %{SOURCE0} shim.efi
+%endif
+%ifarch %{rh_signed_arches}
+%pesign -s -i %{_datadir}/shim/shim.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301 -o shim-%{efidir}.efi
+%endif
+%ifarch %{rh_signed_arches}
+%ifnarch %{ca_signed_arches}
+cp shim-%{efidir}.efi shim.efi
+%endif
+%endif
+
+%pesign -s -i %{_datadir}/shim/MokManager.efi -o MokManager.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301
+%pesign -s -i %{_datadir}/shim/fallback.efi -o fallback.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301
 
 %install
 rm -rf $RPM_BUILD_ROOT
 cd shim-signed-%{version}
 install -D -d -m 0755 $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/
 install -m 0644 shim.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim.efi
-install -m 0644 shim-redhat.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim-redhat.efi
+install -m 0644 shim-%{efidir}.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim-%{efidir}.efi
 install -m 0644 MokManager.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/MokManager.efi
 install -m 0644 %{SOURCE1} $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/BOOT.CSV
 
@@ -92,15 +101,20 @@ install -m 0644 fallback.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/fallback.efi
 
 %files -n shim
 /boot/efi/EFI/%{efidir}/shim.efi
-/boot/efi/EFI/%{efidir}/shim-redhat.efi
+/boot/efi/EFI/%{efidir}/shim-%{efidir}.efi
 /boot/efi/EFI/%{efidir}/MokManager.efi
 /boot/efi/EFI/%{efidir}/BOOT.CSV
 /boot/efi/EFI/BOOT/BOOTX64.EFI
 /boot/efi/EFI/BOOT/fallback.efi
 
 %changelog
-* Fri Jun 20 2014 Karanbir Singh <kbsingh@centos.org> - 0.7-5.2.el7.centos
-- Roll in CentOS SB certs
+* Thu Oct 16 2014 Peter Jones <pjones@redhat.com> - 0.7-8
+- out-of-bounds memory read flaw in DHCPv6 packet processing
+  Resolves: CVE-2014-3675
+- heap-based buffer overflow flaw in IPv6 address parsing
+  Resolves: CVE-2014-3676
+- memory corruption flaw when processing Machine Owner Keys (MOKs)
+  Resolves: CVE-2014-3677
 
 * Thu Feb 27 2014 Peter Jones <pjones@redhat.com> - 0.7-5.2
 - Get the right signatures on shim-redhat.efi
