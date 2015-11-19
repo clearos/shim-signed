@@ -1,1 +1,3 @@
-SOURCES/shim.efi
+SOURCES/mokutil-0.2.0.tar.gz
+SOURCES/shimaa64.efi
+SOURCES/shimx64.efi

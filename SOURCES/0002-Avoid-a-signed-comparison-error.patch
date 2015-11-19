@@ -1,0 +1,26 @@
+From 32a43bf51057e1f9adf0c49cc5246653ae9aeff1 Mon Sep 17 00:00:00 2001
+From: Peter Jones <pjones@redhat.com>
+Date: Thu, 16 Jul 2015 16:13:42 -0400
+Subject: [PATCH 2/2] Avoid a signed comparison error.
+
+Signed-off-by: Peter Jones <pjones@redhat.com>
+---
+ mokutil-0.2.0/src/mokutil.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mokutil-0.2.0/src/mokutil.c b/mokutil-0.2.0/src/mokutil.c
+index 44c8b72..ec7b044 100644
+--- a/mokutil-0.2.0/src/mokutil.c
++++ b/mokutil-0.2.0/src/mokutil.c
+@@ -1201,7 +1201,7 @@ test_key (const char *key_file)
+ 	}
+ 
+ 	read_size = read (fd, key, buf.st_size);
+-	if (read_size < 0 || read_size != buf.st_size) {
++	if (read_size < 0 || read_size != (int64_t)buf.st_size) {
+ 		fprintf (stderr, "Failed to read %s\n", key_file);
+ 		goto error;
+ 	}
+-- 
+2.4.3
+

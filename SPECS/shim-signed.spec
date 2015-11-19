@@ -1,19 +1,45 @@
 Name:           shim-signed
-Version:        0.7
-Release:        8%{?dist}
+Version:        0.9
+Release:        2%{?dist}
 Summary:        First-stage UEFI bootloader
 Provides:	shim = %{version}-%{release}
-%define unsigned_release 8%{?dist}
+%define unsigned_release 1.el7
 
 License:        BSD
 URL:            http://www.codon.org.uk/~mjg59/shim/
-Source0:	shim.efi
-Source1:	BOOT.CSV
-Source2:	secureboot.cer
-Source3:	securebootca.cer
+# incorporate mokutil for packaging simplicity
+%global mokutil_version 0.2.0
+Source0:        https://github.com/lcp/mokutil/archive/mokutil-%{mokutil_version}.tar.gz
+Patch0001:	0001-Fix-a-potential-buffer-overflow.patch
+Patch0002:	0002-Avoid-a-signed-comparison-error.patch
 
-BuildRequires: shim-unsigned = %{version}-%{unsigned_release}
+Source1:	shimx64.efi
+Source2:	shimaa64.efi
+Source3:	secureboot.cer
+Source4:	securebootca.cer
+Source5:	BOOT.CSV
+
+%ifarch x86_64
+%global efiarch X64
+%global efiarchlc x64
+%global shimsrc %{SOURCE1}
+%endif
+%ifarch aarch64
+%global efiarch AA64
+%global efiarchlc aa64
+%global shimsrc %{SOURCE2}
+%endif
+%define unsigned_dir %{_datadir}/shim/%{efiarchlc}-%{version}-%{unsigned_release}/
+
+BuildRequires: git
+BuildRequires: openssl-devel openssl
 BuildRequires: pesign >= 0.106-5%{dist}
+BuildRequires: efivar-devel
+# BuildRequires: shim-unsigned = %{version}-%{unsigned_release}
+BuildRequires: shim-unsigned = %{version}-%{unsigned_release}
+
+# for mokutil's configure
+BuildRequires: autoconf automake
 
 # Shim uses OpenSSL, but cannot use the system copy as the UEFI ABI is not
 # compatible with SysV (there's no red zone under UEFI) and there isn't a
@@ -26,15 +52,24 @@ Provides: bundled(openssl) = 0.9.8zb
 # Adding further platforms will require adding appropriate relocation code.
 ExclusiveArch: x86_64 aarch64
 
-%global debug_package %{nil}
+%define debug_package \
+%ifnarch noarch\
+%global __debug_package 1\
+%package -n mokutil-debuginfo\
+Summary: Debug information for package %{name}\
+Group: Development/Debug\
+AutoReqProv: 0\
+%description -n mokutil-debuginfo\
+This package provides debug information for package %{name}.\
+Debug information is useful when developing applications that use this\
+package or when debugging this package.\
+%files -n mokutil-debuginfo -f debugfiles.list\
+%defattr(-,root,root)\
+%endif\
+%{nil}
 
 # Figure out the right file path to use
-%if 0%{?rhel}
-%global efidir redhat
-%endif
-%if 0%{?fedora}
-%global efidir fedora
-%endif
+%global efidir %(eval echo $(grep ^ID= /etc/os-release | sed -e 's/^ID=//' -e 's/rhel/redhat/'))
 
 %define ca_signed_arches x86_64
 %define rh_signed_arches x86_64 aarch64
@@ -46,8 +81,7 @@ the UEFI signing service.
 
 %package -n shim
 Summary: First-stage UEFI bootloader
-Requires: shim-unsigned = %{version}-%{unsigned_release}
-Requires: mokutil = %{version}-%{unsigned_release}
+Requires: mokutil = %{version}-%{release}
 Provides: shim-signed = %{version}-%{release}
 Obsoletes: shim-signed < %{version}-%{release}
 
@@ -56,26 +90,39 @@ Initial UEFI bootloader that handles chaining to a trusted full bootloader
 under secure boot environments. This package contains the version signed by
 the UEFI signing service.
 
+%package -n mokutil
+Summary: Utilities for managing Secure Boot/MoK keys.
+
+%description -n mokutil
+Utilities for managing the "Machine's Own Keys" list.
+
 %prep
-cd %{_builddir}
-rm -rf shim-signed-%{version}
-mkdir shim-signed-%{version}
+%setup -T -c -n shim-signed-%{version}
+%setup -q -D -a 0 -n shim-signed-%{version} -c
+#%%setup -T -D -n shim-signed-%{version}
+git init
+git config user.email "example@example.com"
+git config user.name "rpmbuild -bp"
+git add .
+git commit -a -q -m "%{version} baseline."
+git am --ignore-whitespace %{patches} </dev/null
+git config --unset user.email
+git config --unset user.name
 
 %build
 %define vendor_token_str %{expand:%%{nil}%%{?vendor_token_name:-t "%{vendor_token_name}"}}
 %define vendor_cert_str %{expand:%%{!?vendor_cert_nickname:-c "Red Hat Test Certificate"}%%{?vendor_cert_nickname:-c "%%{vendor_cert_nickname}"}}
 
-cd shim-signed-%{version}
 %ifarch %{ca_signed_arches}
-pesign -i %{SOURCE0} -h -P > shim.hash
-if ! cmp shim.hash %{_datadir}/shim/shim.hash ; then
+pesign -i %{shimsrc} -h -P > shim.hash
+if ! cmp shim.hash %{unsigned_dir}shim.hash ; then
 	echo Invalid signature\! > /dev/stderr
 	exit 1
 fi
-cp %{SOURCE0} shim.efi
+cp %{shimsrc} shim.efi
 %endif
 %ifarch %{rh_signed_arches}
-%pesign -s -i %{_datadir}/shim/shim.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301 -o shim-%{efidir}.efi
+%pesign -s -i %{unsigned_dir}shim.efi -a %{SOURCE4} -c %{SOURCE3} -n redhatsecureboot301 -o shim-%{efidir}.efi
 %endif
 %ifarch %{rh_signed_arches}
 %ifnarch %{ca_signed_arches}
@@ -83,38 +130,99 @@ cp shim-%{efidir}.efi shim.efi
 %endif
 %endif
 
-%pesign -s -i %{_datadir}/shim/MokManager.efi -o MokManager.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301
-%pesign -s -i %{_datadir}/shim/fallback.efi -o fallback.efi -a %{SOURCE3} -c %{SOURCE2} -n redhatsecureboot301
+%pesign -s -i %{unsigned_dir}MokManager.efi -o MokManager.efi -a %{SOURCE4} -c %{SOURCE3} -n redhatsecureboot301
+%pesign -s -i %{unsigned_dir}fallback.efi -o fallback.efi -a %{SOURCE4} -c %{SOURCE3} -n redhatsecureboot301
+
+cd mokutil-%{mokutil_version}
+./autogen.sh
+%configure
+make %{?_smp_mflags}
 
 %install
 rm -rf $RPM_BUILD_ROOT
-cd shim-signed-%{version}
 install -D -d -m 0755 $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/
 install -m 0644 shim.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim.efi
 install -m 0644 shim-%{efidir}.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim-%{efidir}.efi
 install -m 0644 MokManager.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/MokManager.efi
-install -m 0644 %{SOURCE1} $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/BOOT.CSV
+install -m 0644 %{SOURCE5} $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/BOOT.CSV
 
 install -D -d -m 0755 $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/
-install -m 0644 shim.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/BOOTX64.EFI
+install -m 0644 shim.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/BOOT%{efiarch}.EFI
 install -m 0644 fallback.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/fallback.efi
+
+cd mokutil-%{mokutil_version}
+make PREFIX=%{_prefix} LIBDIR=%{_libdir} DESTDIR=%{buildroot} install
 
 %files -n shim
 /boot/efi/EFI/%{efidir}/shim.efi
 /boot/efi/EFI/%{efidir}/shim-%{efidir}.efi
 /boot/efi/EFI/%{efidir}/MokManager.efi
 /boot/efi/EFI/%{efidir}/BOOT.CSV
-/boot/efi/EFI/BOOT/BOOTX64.EFI
+/boot/efi/EFI/BOOT/BOOT%{efiarch}.EFI
 /boot/efi/EFI/BOOT/fallback.efi
 
+%files -n mokutil
+%{!?_licensedir:%global license %%doc}
+%license mokutil-%{mokutil_version}/COPYING
+%doc mokutil-%{mokutil_version}/README
+%{_bindir}/mokutil
+%{_mandir}/man1/*
+
 %changelog
-* Thu Oct 16 2014 Peter Jones <pjones@redhat.com> - 0.7-8
+* Mon Jul 20 2015 Peter Jones <pjones@redhat.com> - 0.9-2
+- Apparently I'm *never* going to learn to build this in the right target
+  the first time through.
+  Related: rhbz#1100048
+
+* Mon Jun 29 2015 Peter Jones <pjones@redhat.com> - 0.9-0.1
+- Bump version for 0.9
+  Also use mokutil-0.3.0
+  Related: rhbz#1100048
+
+* Tue Jun 23 2015 Peter Jones <pjones@redhat.com> - 0.7-14.1
+- Fix mokutil_version usage.
+  Related: rhbz#1100048
+
+* Mon Jun 22 2015 Peter Jones <pjones@redhat.com> - 0.7-14
+- Pull in aarch64 build so they can compose that tree.
+  (-14 to match -unsigned)
+  Related: rhbz#1100048
+
+* Wed Feb 25 2015 Peter Jones <pjones@redhat.com> - 0.7-12
+- Fix some minor build bugs on Aarch64
+  Related: rhbz#1190191
+
+* Tue Feb 24 2015 Peter Jones <pjones@redhat.com> - 0.7-11
+- Fix section loading on Aarch64
+  Related: rhbz#1190191
+
+* Wed Dec 17 2014 Peter Jones <pjones@redhat.com> - 0.7-10
+- Rebuild for Aarch64 to get \EFI\BOOT\BOOTAA64.EFI named right.
+  (I managed to fix the inputs but not the outputs in -9.)
+  Related: rhbz#1100048
+
+* Wed Dec 17 2014 Peter Jones <pjones@redhat.com> - 0.7-9
+- Rebuild for Aarch64 to get \EFI\BOOT\BOOTAA64.EFI named right.
+  Related: rhbz#1100048
+
+* Tue Oct 21 2014 Peter Jones <pjones@redhat.com> - 0.7-8
+- Build for aarch64 as well 
+  Related: rhbz#1100048
 - out-of-bounds memory read flaw in DHCPv6 packet processing
   Resolves: CVE-2014-3675
 - heap-based buffer overflow flaw in IPv6 address parsing
   Resolves: CVE-2014-3676
 - memory corruption flaw when processing Machine Owner Keys (MOKs)
   Resolves: CVE-2014-3677
+
+* Tue Sep 23 2014 Peter Jones <pjones@redhat.com> - 0.7-7
+- Make sure we use the right keys on Aarch64.
+  (It's only a demo at this stage.)
+  Related: rhbz#1100048
+
+* Tue Sep 23 2014 Peter Jones <pjones@redhat.com> - 0.7-6
+- Add ARM Aarch64.
+  Related: rhbz#1100048
 
 * Thu Feb 27 2014 Peter Jones <pjones@redhat.com> - 0.7-5.2
 - Get the right signatures on shim-redhat.efi
