@@ -3,7 +3,7 @@ Version:        0.9
 Release:        2%{?dist}
 Summary:        First-stage UEFI bootloader
 Provides:	shim = %{version}-%{release}
-%define unsigned_release 1.el7
+%define unsigned_release 1.el7.centos
 
 License:        BSD
 URL:            http://www.codon.org.uk/~mjg59/shim/
