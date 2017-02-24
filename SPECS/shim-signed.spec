@@ -1,6 +1,6 @@
 Name:           shim-signed
 Version:        0.9
-Release:        2%{?dist}
+Release:        2%{?dist}.1
 Summary:        First-stage UEFI bootloader
 Provides:	shim = %{version}-%{release}
 %define unsigned_release 1.el7.centos
