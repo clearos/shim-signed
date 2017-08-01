@@ -1,33 +1,46 @@
 Name:           shim-signed
-Version:        0.9
-Release:        2%{?dist}
+Version:        12
+Release:        1%{?dist}%{?buildid}
 Summary:        First-stage UEFI bootloader
-Provides:	shim = %{version}-%{release}
-%define unsigned_release 1.el7
+%define unsigned_release 1%{?dist}
 
 License:        BSD
 URL:            http://www.codon.org.uk/~mjg59/shim/
 # incorporate mokutil for packaging simplicity
-%global mokutil_version 0.2.0
+%global mokutil_version 0.3.0
 Source0:        https://github.com/lcp/mokutil/archive/mokutil-%{mokutil_version}.tar.gz
-Patch0001:	0001-Fix-a-potential-buffer-overflow.patch
-Patch0002:	0002-Avoid-a-signed-comparison-error.patch
+Patch0001: 0001-Fix-the-potential-buffer-overflow.patch
+Patch0002: 0002-Fix-the-32bit-signedness-comparison.patch
+Patch0003: 0003-Build-with-fshort-wchar-so-toggle-passwords-work-rig.patch
+Patch0004: 0004-Don-t-allow-sha1-on-the-mokutil-command-line.patch
+Patch0005: 0005-Make-all-efi_guid_t-const.patch
+Patch0006: 0006-mokutil-be-explicit-about-file-modes-in-all-cases.patch
+Patch0007: 0007-Add-bash-completion-file.patch
 
-Source1:	shimx64.efi
-Source2:	shimaa64.efi
-Source3:	secureboot.cer
-Source4:	securebootca.cer
-Source5:	BOOT.CSV
+Source1:	secureboot.cer
+Source2:	securebootca.cer
+Source10:	shimx64.efi
+Source11:	shimia32.efi
+Source12:	shimaa64.efi
+Source20:	BOOTX64.CSV
+Source21:	BOOTIA32.CSV
+Source22:	BOOTAA64.CSV
 
 %ifarch x86_64
 %global efiarch X64
 %global efiarchlc x64
-%global shimsrc %{SOURCE1}
+%global shimsrc %{SOURCE10}
+%global bootsrc %{SOURCE20}
+
+%global shimsrcia32 %{SOURCE11}
+%global bootsrcia32 %{SOURCE21}
+%define unsigned_dir_ia32 %{_datadir}/shim/ia32-%{version}-%{unsigned_release}/
 %endif
 %ifarch aarch64
 %global efiarch AA64
 %global efiarchlc aa64
-%global shimsrc %{SOURCE2}
+%global shimsrc %{SOURCE12}
+%global bootsrc %{SOURCE22}
 %endif
 %define unsigned_dir %{_datadir}/shim/%{efiarchlc}-%{version}-%{unsigned_release}/
 
@@ -35,17 +48,13 @@ BuildRequires: git
 BuildRequires: openssl-devel openssl
 BuildRequires: pesign >= 0.106-5%{dist}
 BuildRequires: efivar-devel
-# BuildRequires: shim-unsigned = %{version}-%{unsigned_release}
-BuildRequires: shim-unsigned = %{version}-%{unsigned_release}
+BuildRequires: shim-unsigned-%{efiarchlc} = %{version}-%{unsigned_release}
+%ifarch x86_64
+BuildRequires: shim-unsigned-ia32 = %{version}-%{unsigned_release}
+%endif
 
 # for mokutil's configure
 BuildRequires: autoconf automake
-
-# Shim uses OpenSSL, but cannot use the system copy as the UEFI ABI is not
-# compatible with SysV (there's no red zone under UEFI) and there isn't a
-# POSIX-style C library.
-# BuildRequires: OpenSSL
-Provides: bundled(openssl) = 0.9.8zb
 
 # Shim is only required on platforms implementing the UEFI secure boot
 # protocol. The only one of those we currently wish to support is 64-bit x86.
@@ -79,16 +88,37 @@ Initial UEFI bootloader that handles chaining to a trusted full bootloader
 under secure boot environments. This package contains the version signed by
 the UEFI signing service.
 
-%package -n shim
+%package -n shim-%{efiarchlc}
 Summary: First-stage UEFI bootloader
 Requires: mokutil = %{version}-%{release}
-Provides: shim-signed = %{version}-%{release}
-Obsoletes: shim-signed < %{version}-%{release}
+Provides: shim = %{version}-%{release}
+Obsoletes: shim
+# Shim uses OpenSSL, but cannot use the system copy as the UEFI ABI is not
+# compatible with SysV (there's no red zone under UEFI) and there isn't a
+# POSIX-style C library.
+# BuildRequires: OpenSSL
+Provides: bundled(openssl) = 0.9.8zb
 
-%description -n shim
+%description -n shim-%{efiarchlc}
 Initial UEFI bootloader that handles chaining to a trusted full bootloader
 under secure boot environments. This package contains the version signed by
 the UEFI signing service.
+
+%ifarch x86_64
+%package -n shim-ia32
+Summary: First-stage UEFI bootloader
+Requires: mokutil = %{version}-%{release}
+# Shim uses OpenSSL, but cannot use the system copy as the UEFI ABI is not
+# compatible with SysV (there's no red zone under UEFI) and there isn't a
+# POSIX-style C library.
+# BuildRequires: OpenSSL
+Provides: bundled(openssl) = 0.9.8zb
+
+%description -n shim-ia32
+Initial UEFI bootloader that handles chaining to a trusted full bootloader
+under secure boot environments. This package contains the version signed by
+the UEFI signing service.
+%endif
 
 %package -n mokutil
 Summary: Utilities for managing Secure Boot/MoK keys.
@@ -97,41 +127,61 @@ Summary: Utilities for managing Secure Boot/MoK keys.
 Utilities for managing the "Machine's Own Keys" list.
 
 %prep
-%setup -T -c -n shim-signed-%{version}
-%setup -q -D -a 0 -n shim-signed-%{version} -c
-#%%setup -T -D -n shim-signed-%{version}
+%setup -T -q -a 0 -n shim-signed-%{version} -c
 git init
 git config user.email "example@example.com"
 git config user.name "rpmbuild -bp"
 git add .
 git commit -a -q -m "%{version} baseline."
-git am --ignore-whitespace %{patches} </dev/null
+cd mokutil-%{mokutil_version}
+git am --ignore-whitespace --directory=mokutil-%{mokutil_version} %{patches} </dev/null
 git config --unset user.email
 git config --unset user.name
+cd ..
 
 %build
 %define vendor_token_str %{expand:%%{nil}%%{?vendor_token_name:-t "%{vendor_token_name}"}}
 %define vendor_cert_str %{expand:%%{!?vendor_cert_nickname:-c "Red Hat Test Certificate"}%%{?vendor_cert_nickname:-c "%%{vendor_cert_nickname}"}}
 
 %ifarch %{ca_signed_arches}
-pesign -i %{shimsrc} -h -P > shim.hash
-if ! cmp shim.hash %{unsigned_dir}shim.hash ; then
+pesign -i %{shimsrc} -h -P > shim%{efiarchlc}.hash
+if ! cmp shim%{efiarchlc}.hash %{unsigned_dir}shim%{efiarchlc}.hash ; then
 	echo Invalid signature\! > /dev/stderr
+	echo saved hash is $(cat %{unsigned_dir}shim%{efiarchlc}.hash) > /dev/stderr
+	echo shim%{efiarchlc}.efi hash is $(cat shim%{efiarchlc}.hash) > /dev/stderr
 	exit 1
 fi
-cp %{shimsrc} shim.efi
+cp %{shimsrc} shim%{efiarchlc}.efi
+%ifarch x86_64
+pesign -i %{shimsrcia32} -h -P > shimia32.hash
+if ! cmp shimia32.hash %{unsigned_dir_ia32}shimia32.hash ; then
+	echo Invalid signature\! > /dev/stderr
+	echo saved hash is $(cat %{unsigned_dir_ia32}shimia32.hash) > /dev/stderr
+	echo shimia32.efi hash is $(cat shimia32.hash) > /dev/stderr
+	exit 1
+fi
+cp %{shimsrcia32} shimia32.efi
+%endif
 %endif
 %ifarch %{rh_signed_arches}
-%pesign -s -i %{unsigned_dir}shim.efi -a %{SOURCE4} -c %{SOURCE3} -n redhatsecureboot301 -o shim-%{efidir}.efi
+%pesign -s -i %{unsigned_dir}shim%{efiarchlc}.efi -a %{SOURCE2} -c %{SOURCE1} -n redhatsecureboot301 -o shim%{efiarchlc}-%{efidir}.efi
+%ifarch x86_64
+%pesign -s -i %{unsigned_dir_ia32}shimia32.efi -a %{SOURCE2} -c %{SOURCE1} -n redhatsecureboot301 -o shimia32-%{efidir}.efi
+%endif
 %endif
 %ifarch %{rh_signed_arches}
 %ifnarch %{ca_signed_arches}
-cp shim-%{efidir}.efi shim.efi
+cp shim%{efiarchlc}-%{efidir}.efi shim%{efiarchlc}.efi
 %endif
 %endif
 
-%pesign -s -i %{unsigned_dir}MokManager.efi -o MokManager.efi -a %{SOURCE4} -c %{SOURCE3} -n redhatsecureboot301
-%pesign -s -i %{unsigned_dir}fallback.efi -o fallback.efi -a %{SOURCE4} -c %{SOURCE3} -n redhatsecureboot301
+%pesign -s -i %{unsigned_dir}mm%{efiarchlc}.efi -o mm%{efiarchlc}.efi -a %{SOURCE2} -c %{SOURCE1} -n redhatsecureboot301
+%pesign -s -i %{unsigned_dir}fb%{efiarchlc}.efi -o fb%{efiarchlc}.efi -a %{SOURCE2} -c %{SOURCE1} -n redhatsecureboot301
+
+%ifarch x86_64
+%pesign -s -i %{unsigned_dir_ia32}mmia32.efi -o mmia32.efi -a %{SOURCE2} -c %{SOURCE1} -n redhatsecureboot301
+%pesign -s -i %{unsigned_dir_ia32}fbia32.efi -o fbia32.efi -a %{SOURCE2} -c %{SOURCE1} -n redhatsecureboot301
+%endif
 
 cd mokutil-%{mokutil_version}
 ./autogen.sh
@@ -141,25 +191,58 @@ make %{?_smp_mflags}
 %install
 rm -rf $RPM_BUILD_ROOT
 install -D -d -m 0755 $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/
-install -m 0644 shim.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim.efi
-install -m 0644 shim-%{efidir}.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim-%{efidir}.efi
-install -m 0644 MokManager.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/MokManager.efi
-install -m 0644 %{SOURCE5} $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/BOOT.CSV
+install -m 0644 shim%{efiarchlc}.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim%{efiarchlc}.efi
+install -m 0644 shim%{efiarchlc}-%{efidir}.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim%{efiarchlc}-%{efidir}.efi
+install -m 0644 mm%{efiarchlc}.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/mm%{efiarchlc}.efi
+install -m 0644 %{bootsrc} $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/BOOT%{efiarch}.CSV
 
 install -D -d -m 0755 $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/
-install -m 0644 shim.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/BOOT%{efiarch}.EFI
-install -m 0644 fallback.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/fallback.efi
+install -m 0644 shim%{efiarchlc}.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/BOOT%{efiarch}.EFI
+install -m 0644 fb%{efiarchlc}.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/fb%{efiarchlc}.efi
+
+%ifarch aarch64
+# In case old boot entries aren't updated
+install -m 0644 %{shimsrc} $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim.efi
+%endif
+
+%ifarch x86_64
+# In case old boot entries aren't updated
+install -m 0644 shimx64.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shim.efi
+install -m 0644 %{bootsrc} $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/BOOT.CSV
+
+install -m 0644 shimia32.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shimia32.efi
+install -m 0644 shimia32.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shimia32.efi
+install -m 0644 shimia32-%{efidir}.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/shimia32-%{efidir}.efi
+install -m 0644 mmia32.efi $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/mmia32.efi
+install -m 0644 %{bootsrcia32} $RPM_BUILD_ROOT/boot/efi/EFI/%{efidir}/BOOTIA32.CSV
+
+install -m 0644 shimia32.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/BOOTIA32.EFI
+install -m 0644 fbia32.efi $RPM_BUILD_ROOT/boot/efi/EFI/BOOT/fbia32.efi
+%endif
 
 cd mokutil-%{mokutil_version}
 make PREFIX=%{_prefix} LIBDIR=%{_libdir} DESTDIR=%{buildroot} install
 
-%files -n shim
-/boot/efi/EFI/%{efidir}/shim.efi
-/boot/efi/EFI/%{efidir}/shim-%{efidir}.efi
-/boot/efi/EFI/%{efidir}/MokManager.efi
-/boot/efi/EFI/%{efidir}/BOOT.CSV
+%files -n shim-%{efiarchlc}
+/boot/efi/EFI/%{efidir}/shim%{efiarchlc}.efi
+/boot/efi/EFI/%{efidir}/shim%{efiarchlc}-%{efidir}.efi
+/boot/efi/EFI/%{efidir}/mm%{efiarchlc}.efi
+/boot/efi/EFI/%{efidir}/BOOT%{efiarch}.CSV
 /boot/efi/EFI/BOOT/BOOT%{efiarch}.EFI
-/boot/efi/EFI/BOOT/fallback.efi
+/boot/efi/EFI/BOOT/fb%{efiarchlc}.efi
+/boot/efi/EFI/%{efidir}/shim.efi
+
+%ifarch x86_64
+/boot/efi/EFI/%{efidir}/BOOT.CSV
+
+%files -n shim-ia32
+/boot/efi/EFI/%{efidir}/shimia32.efi
+/boot/efi/EFI/%{efidir}/shimia32-%{efidir}.efi
+/boot/efi/EFI/%{efidir}/mmia32.efi
+/boot/efi/EFI/%{efidir}/BOOTIA32.CSV
+/boot/efi/EFI/BOOT/BOOTIA32.EFI
+/boot/efi/EFI/BOOT/fbia32.efi
+%endif
 
 %files -n mokutil
 %{!?_licensedir:%global license %%doc}
@@ -167,8 +250,44 @@ make PREFIX=%{_prefix} LIBDIR=%{_libdir} DESTDIR=%{buildroot} install
 %doc mokutil-%{mokutil_version}/README
 %{_bindir}/mokutil
 %{_mandir}/man1/*
+%{_datadir}/bash-completion/completions/mokutil
 
 %changelog
+* Mon May 01 2017 Peter Jones <pjones@redhat.com> - 12-1
+- Update to 12-1 to work around a signtool.exe bug
+  Resolves: rhbz#1445393
+
+* Mon Apr 24 2017 Peter Jones <pjones@redhat.com> - 11-4
+- Another shot at better obsoletes.
+  Related: rhbz#1310764
+
+* Mon Apr 24 2017 Peter Jones <pjones@redhat.com> - 11-3
+- Fix Obsoletes
+  Related: rhbz#1310764
+
+* Thu Apr 13 2017 Peter Jones <pjones@redhat.com> - 11-2
+- Make sure Aarch64 still has shim.efi as well
+  Related: rhbz#1310766
+
+* Wed Apr 12 2017 Peter Jones <pjones@redhat.com> - 11-1
+- Rebuild with signed shim
+  Related: rhbz#1310766
+
+* Mon Apr 03 2017 Peter Jones <pjones@redhat.com> - 11-0.1
+- Update to 11-0.1 to match shim-11-1
+  Related: rhbz#1310766
+- Fix regression in PE loader
+  Related: rhbz#1310766
+- Fix case where BDS invokes us wrong and we exec shim again as a result
+  Related: rhbz#1310766
+
+* Mon Mar 27 2017 Peter Jones <pjones@redhat.com> - 10-0.1
+- Support ia32
+  Resolves: rhbz#1310766
+- Handle various different load option implementation differences
+- TPM 1 and TPM 2 support.
+- Update to OpenSSL 1.0.2k
+
 * Mon Jul 20 2015 Peter Jones <pjones@redhat.com> - 0.9-2
 - Apparently I'm *never* going to learn to build this in the right target
   the first time through.
