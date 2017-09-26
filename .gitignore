@@ -1,4 +1,6 @@
-SOURCES/mokutil-0.2.0.tar.gz
-SOURCES/shimaa64.efi
 /Makefile
 *.src.rpm
+SOURCES/mokutil-0.3.0.tar.gz
+SOURCES/shimaa64.efi
+SOURCES/shimia32.efi
+SOURCES/shimx64.efi
